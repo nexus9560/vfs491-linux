@@ -2,9 +2,9 @@
 
 We use HP's own binaries as **measurement instruments** to learn the wire
 protocol. Nothing in this file (and nothing the tools emit) is redistributed or
-linked into the driver. All artifacts live outside the repo
-(`/tmp/opencode/...`, and the pre-existing `~/INF/...`); the repo only contains
-our own tools and notes.
+linked into the driver. All artifacts live outside the repo (`/tmp/opencode/...`,
+plus an optional local Windows-driver tree); the repo only contains our own
+tools and notes.
 
 ## 1. What we have
 
@@ -15,7 +15,13 @@ our own tools and notes.
 | `usr/sbin/HPUsbVFS491.img` (315392 B) | inside sp84530 | our sensor's firmware image |
 | `usr/sbin/HPUsbVFS495.img` | inside sp84530 | VFS495 equivalent |
 | `usr/bin/vcsFPService`, `usr/lib64/libvfsFprintWrapper.so` | inside sp84530 | the proprietary daemon/wrapper (not used) |
-| Synaptics/Validity **Windows** driver 4.5.341.0 (x86 + x64) | already on the box at `~/INF/` | includes `wbf_vfs_003d_adv.dll` (our chip!) and `vcsAPIFORWBF.dll` |
+| Synaptics/Validity **Windows** driver 4.5.341.0 (x86 + x64) | *optional*; extract it yourself if you want it | includes `wbf_vfs_003d_adv.dll` (our chip!) and `vcsAPIFORWBF.dll` |
+
+The Windows-driver row was originally taken from a copy already unpacked on the
+development machine (`~/INF/`). It is **not required** for anything here — the
+protocol work that matters comes from `sp84530`. If you do want it, it lives in
+the Windows driver package from HP's support page for this model; unpack it
+somewhere outside the repo and keep it there.
 
 ### Provenance / hashes
 

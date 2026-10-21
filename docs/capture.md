@@ -20,7 +20,9 @@ exact parse command at the end.
 Better output (optional, one-time install; needs root for usbmon either way):
 
 ```bash
-sudo dnf install -y wireshark-cli
+sudo dnf install -y wireshark-cli          # Fedora
+sudo apt install -y tshark                 # Debian/Ubuntu
+sudo pacman -S wireshark-cli               # Arch
 ```
 
 ## The 32-byte limit of the text API
@@ -82,10 +84,10 @@ Done on 2026-10-16 (`captures/getver.txt`), and it confirms the framing in
 
 Not possible yet, and this is the honest blocker: after cleanup there is no
 host-side implementation that can put the sensor into a state where it waits for
-a finger. The old proprietary stack could, but it is removed (there is an
-optional `~/vfs491-proprietary-backup.tgz` from the cleanup step if you ever
-decide to use HP's tool strictly as a *measuring instrument* to obtain reference
-traces -- that is a research decision, not part of the working solution).
+a finger. The old proprietary stack could, but it is removed. If you ever decide
+to use HP's tool strictly as a *measuring instrument* to obtain reference traces,
+re-fetch the SoftPaq (nothing is shipped in the repo) -- that is a research
+decision, not part of the working solution.
 
 Until then, swipe traffic can only be captured once our own host implementation
 gets through the command sequence + session setup. Order of work is in
@@ -117,6 +119,30 @@ python3 capture/selftest.py
 ```
 
 No root, no hardware, no packages.
+
+## Making sure HP's tool can open the sensor
+
+The working path runs HP's `validity-sensor` under gdb, and that tool needs
+**exclusive** access to `138a:003d`. If something else already owns the device,
+you get `Open Sensor failed` / `Sensor isn't detected` and no capture.
+
+Only one of these is usually true for you:
+
+* **You never built the open driver.** Then there is nothing to do — the stock
+  system has no vfs491 driver, and the sensor is free. This is the normal case.
+* **You built and installed the open driver** (`build-libfprint.sh`) on this
+  machine. Its udev/autosuspend entries can claim the device. Undo that before
+  using the proprietary path:
+  * if you installed a modified libfprint, restore the stock one:
+    `sudo dnf reinstall libfprint` (or `apt install --reinstall libfprint-2-2`)
+  * remove any driver udev rule you added under `/etc/udev/rules.d/`
+  * reload: `sudo udevadm control --reload && sudo udevadm trigger --subsystem-match=usb`
+
+The two paths are alternatives: the native driver is research, the vendor
+capture path is what works. Run one or the other, not both.
+
+If the sensor is wedged after many rapid captures, re-enumerate it (no reboot) —
+`proprietary/enable-auth.sh --reenumerate`, or see `proprietary/README.md`.
 
 ## Do not publish
 

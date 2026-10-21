@@ -1,9 +1,11 @@
 # fingerprint-sensor
 
 Open-source support for the **Validity VFS491** fingerprint sensor
-(USB **`138a:003d`**) on an HP EliteBook 8770w running Fedora 44. The driver is
-open source and contains no vendor code; HP's RAM patches are loaded at runtime
-from files the user supplies and are never committed here.
+(USB **`138a:003d`**), developed on an HP EliteBook 8770w running Fedora 44 but
+written to be distro-neutral: nothing in the shipped path assumes a particular
+distribution, package manager, username, or desktop. The driver is open source
+and contains no vendor code; HP's RAM patches are loaded at runtime from files
+the user supplies and are never committed here.
 
 Status: **working on hardware.** Two paths are documented here.
 
@@ -30,15 +32,20 @@ On this machine the sensor already works end to end. Clone the repo anywhere
 and run everything below from its root:
 
 ```bash
-./proprietary/setup.sh                              # fetch + patch + install (sudo)
+./proprietary/setup.sh                              # fetch + patch + install (needs root)
 sudo systemctl enable --now vfs491-bridge.service
 sudo systemctl restart fprintd
 
-sudo fprintd-enroll "$USER"                          # swipe when the sensor is armed (~2 s)
-sudo fprintd-verify "$USER"                          # -> verify-match
+sudo fprintd-enroll "${SUDO_USER:-$USER}"            # swipe when the sensor is armed (~2 s)
+sudo fprintd-verify "${SUDO_USER:-$USER}"            # -> verify-match
 journalctl -u fprintd | grep score                  # e.g. "score 175/40" (>=40 = match)
 journalctl -u vfs491-bridge -f                      # prints "SWIPE NOW" when armed
 ```
+
+Works on any distro: `setup.sh` does not call a package manager, checks for the
+tools it needs, and unpacks HP's RPM with whichever of `rpm2cpio`+`cpio`,
+`bsdtar`, `7z`, or a built-in Python reader is available. The only hard
+requirement is Python 3 and systemd.
 
 See [`proprietary/README.md`](proprietary/README.md) for the architecture,
 timing, and recovery from a wedged sensor.
@@ -46,13 +53,21 @@ timing, and recovery from a wedged sensor.
 ## Use it for authentication (sudo, polkit, login, lock screen)
 
 ```bash
-./proprietary/enable-auth.sh        # installs fprintd-pam + enables with-fingerprint
+./proprietary/enable-auth.sh              # wire fingerprint into PAM
+./proprietary/enable-auth.sh --status     # show what is wired
+./proprietary/enable-auth.sh --undo       # reverse it
 ```
 
-Fingerprint is offered for `sudo`, `su`, `login`, the KDE lock screen, the KDE
-greeter, and polkit prompts. The password prompt always remains as a fallback.
-Undo with `sudo authselect disable-feature with-fingerprint`. Details in
-[`proprietary/README.md`](proprietary/README.md).
+Cross-distro: on Fedora/RHEL it uses `authselect` (tracked and reversible); on
+Debian, Arch and everywhere else it edits the PAM service files directly,
+keeping a `*.vfs491-bak` backup of each file it touches. It detects your actual
+display manager (gdm, sddm, lightdm, plasmalogin, ...) for cold-boot ordering
+instead of assuming one, and prints the package name of the PAM module if it is
+missing.
+
+Fingerprint is offered for `sudo`, `su`, `login`, the greeter, the lock screen,
+and polkit prompts. `pam_fprintd` is `sufficient`, so the password prompt always
+remains as a fallback. Details in [`proprietary/README.md`](proprietary/README.md).
 
 ## Why it has to be written from scratch
 
@@ -213,6 +228,7 @@ mkdir -p reference
 git clone --depth 1 https://github.com/saifulmd0/vfs495-linux        reference/vfs495-linux
 git clone --depth 1 https://github.com/mbtech-nl/nixos-validity-VFS491 reference/nixos-validity-VFS491
 sudo dnf install -y wireshark-cli        # optional: pcap instead of text API
+                                         # (Debian: apt install tshark; Arch: pacman -S wireshark-cli)
 ```
 
 ## Next steps

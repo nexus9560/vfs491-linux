@@ -9,9 +9,11 @@ actually lasts.
 Environment:
   FP_VIRTUAL_IMAGE  socket libfprint listens on (default /run/fprint/virtimg_sock)
   VFS491_CAPTURE    path to capture.py
+  VFS_TIMEOUT       optional gdb/harvest timeout in seconds (default 70)
 Adapted from saifulmd0/vfs495-linux and mbtech-nl/nixos-validity-VFS491 (MIT).
 """
 import os
+import shutil
 import signal
 import socket
 import struct
@@ -20,12 +22,38 @@ import sys
 import threading
 import time
 
+# Check our dependencies with a clear message. This runs as a systemd service
+# with Restart=always, so a bare ImportError would crash-loop forever with a
+# traceback buried in the journal; say exactly what is missing instead.
+_missing = []
+for _mod, _pkg in (("dbus", "python3-dbus"),
+                   ("gi", "python3-gobject")):
+    try:
+        __import__(_mod)
+    except ImportError:
+        _missing.append((_mod, _pkg))
+if _missing:
+    sys.stderr.write(
+        "vfs491-bridge: missing Python module(s): "
+        + ", ".join(m for m, _ in _missing) + "\n"
+        + "Install them, e.g.:\n"
+        + "  Fedora/RHEL  sudo dnf install python3-dbus python3-gobject\n"
+        + "  Debian       sudo apt install python3-dbus python3-gi\n"
+        + "  Arch         sudo pacman -S python-dbus python-gobject\n"
+        + "  openSUSE     sudo zypper install python3-dbus-python python3-gobject\n"
+    )
+    sys.exit(1)
+
 import dbus
 import dbus.mainloop.glib
 from gi.repository import GLib
 
 SOCK = os.environ.get("FP_VIRTUAL_IMAGE", "/run/fprint/virtimg_sock")
-CAPTURE = os.environ["VFS491_CAPTURE"]            # capture.py
+CAPTURE = os.environ.get("VFS491_CAPTURE")
+if not CAPTURE:
+    sys.stderr.write("vfs491-bridge: VFS491_CAPTURE is not set "
+                     "(path to capture.py); see the systemd unit\n")
+    sys.exit(1)
 MIN_ROWS = 80                                # a real swipe assembles to ~200x300; tiny = no usable print
 RUN = "/run/vfs491-fprint"                   # tmpfs, root only; last.pgm = most recent capture (debugging)
 BUS_NAME, DEV_IFACE = "net.reactivated.Fprint", "net.reactivated.Fprint.Device"
@@ -60,10 +88,19 @@ def run_capture(out):
         os.unlink(armed)
     except OSError:
         pass
+    # Keep the capture's own output out of the journal on success (gdb is noisy)
+    # but retain it in a file so a failure is diagnosable rather than silent.
+    cap_log = RUN + "/capture.log"
+    try:
+        lf = open(cap_log, "wb")
+    except OSError:
+        lf = subprocess.DEVNULL
     p = subprocess.Popen([sys.executable, CAPTURE, out],
                          env={**os.environ, "VFS_TIMEOUT": "70", "VFS_ARMED": armed},
-                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                         stdout=lf, stderr=lf,
                          start_new_session=True)
+    if lf != subprocess.DEVNULL:
+        lf.close()
     with lock:
         state["proc"] = p
     # Watch for the armed marker and tell the user exactly when to swipe.
@@ -88,8 +125,14 @@ def kill_capture():
             os.killpg(p.pid, signal.SIGTERM)
         except OSError:
             pass
-        subprocess.run(["pkill", "-9", "-f", "validity-sensor-unlocked"],
-                       stderr=subprocess.DEVNULL)
+        # Belt-and-braces: sweep any stray tool. pkill is not universal, so a
+        # missing binary must not raise here.
+        if shutil.which("pkill"):
+            try:
+                subprocess.run(["pkill", "-9", "-f", "validity-sensor-unlocked"],
+                               stderr=subprocess.DEVNULL)
+            except OSError:
+                pass
 
 
 def capture_and_deliver(gen):

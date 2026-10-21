@@ -11,18 +11,29 @@ Adapted from saifulmd0/vfs495-linux and mbtech-nl/nixos-validity-VFS491 (MIT).
 """
 import os
 import struct
+import shutil
 import subprocess
 import sys
 import tempfile
 import time
 
-TOOL = os.environ["VFS491_TOOL"]        # gate-patched validity-sensor
-HARVEST = os.environ["VFS491_HARVEST"]  # harvest.py
+TOOL = os.environ.get("VFS491_TOOL")        # gate-patched validity-sensor
+HARVEST = os.environ.get("VFS491_HARVEST")  # harvest.py
 
 
 def main():
     if len(sys.argv) != 2:
         sys.exit("usage: vfs491-capture OUT.pgm")
+    for var, val in (("VFS491_TOOL", TOOL), ("VFS491_HARVEST", HARVEST)):
+        if not val:
+            sys.exit(f"vfs491-capture: {var} is not set "
+                     f"(see /usr/libexec/vfs491/vfs491-capture)")
+    if not shutil.which("gdb"):
+        sys.exit("vfs491-capture: gdb not found. Install it:\n"
+                 "  Fedora/RHEL  sudo dnf install gdb\n"
+                 "  Debian       sudo apt install gdb\n"
+                 "  Arch         sudo pacman -S gdb\n"
+                 "  openSUSE     sudo zypper install gdb")
     fd, asm = tempfile.mkstemp(suffix=".bin")
     os.close(fd)
     armed = os.environ.get("VFS_ARMED")
@@ -42,8 +53,14 @@ def main():
                        timeout=int(os.environ.get("VFS_TIMEOUT", "75")),
                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     except subprocess.TimeoutExpired:
-        subprocess.run(["pkill", "-9", "-f", "validity-sensor-unlocked"],
-                       stderr=subprocess.DEVNULL)
+        # pkill is not present everywhere; a missing binary must not mask the
+        # real error (the timeout we are handling).
+        if shutil.which("pkill"):
+            try:
+                subprocess.run(["pkill", "-9", "-f", "validity-sensor-unlocked"],
+                               stderr=subprocess.DEVNULL)
+            except OSError:
+                pass
     try:
         d = open(asm, "rb").read()
     finally:

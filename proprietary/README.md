@@ -30,17 +30,43 @@ Only **SSL + capture** are delegated to the vendor tool; the driver
 scaffolding, the bridge, and the matching (libfprint's normal NBIS matcher) are
 ours / upstream.
 
+## Requirements
+
+Nothing here is distro-specific. The install path needs:
+
+| Need | Why | Notes |
+|---|---|---|
+| Python 3 | the bridge, capture and harvest scripts | ≥3.6 |
+| `gdb` | drives HP's tool to grab the reconstructed image | required |
+| systemd | the bridge runs as a service | optional; you can run it by hand |
+| one RPM unpacker | to open HP's SoftPaq | `rpm2cpio`+`cpio`, `bsdtar`, `7z`, **or just Python 3** |
+| `python3-dbus`, `python3-gobject` | the bridge listens on fprintd's D-Bus signal | required for auth |
+| `fprintd` + a libfprint with `virtual_image` | matching is done by stock libfprint | `setup.sh` warns if absent |
+
+Package names, if `setup.sh` or the bridge says something is missing:
+
+| Tool | Fedora/RHEL | Debian/Ubuntu | Arch | openSUSE |
+|---|---|---|---|---|
+| gdb | `gdb` | `gdb` | `gdb` | `gdb` |
+| dbus bindings | `python3-dbus` | `python3-dbus` | `python-dbus` | `python3-dbus-python` |
+| gobject bindings | `python3-gobject` | `python3-gi` | `python-gobject` | `python3-gobject` |
+| RPM unpacking | `rpm` + `cpio` | `rpm2cpio` + `cpio` | `libarchive` | `rpm` + `cpio` |
+| PAM module | `fprintd-pam` | `libpam-fprintd` | `fprintd` | `fprintd-pam` |
+
+None of these are installed automatically; the scripts tell you what is missing
+and stop, rather than calling a package manager behind your back.
+
 ## Install
 
 ```bash
-./proprietary/setup.sh          # fetch sp84530, gate-patch, install units (asks for sudo)
+./proprietary/setup.sh          # fetch sp84530, gate-patch, install units (needs root)
 sudo systemctl enable --now vfs491-bridge.service
 sudo systemctl restart fprintd
 ```
 
-`setup.sh` verifies the SoftPaq SHA-256, unpacks the RPM, gate-patches the
-tool's `main()` guard, installs `validity-sensor-unlocked` + these scripts into
-`/usr/libexec/vfs491/`, and installs:
+`setup.sh` verifies the SoftPaq SHA-256, unpacks the RPM with whichever tool you
+have, gate-patches the tool's `main()` guard, installs `validity-sensor-unlocked`
++ these scripts into `/usr/libexec/vfs491/`, and installs:
 
 * `/etc/systemd/system/fprintd.service.d/virtual-image.conf` — sets
   `FP_VIRTUAL_IMAGE` so stock libfprint uses its `virtual_image` driver.
@@ -52,26 +78,42 @@ committed**.
 ## Using it for authentication
 
 `./enable-auth.sh` installs `fprintd-pam` (provides `pam_fprintd.so`, which
-`fprintd` alone does not ship) and enables the authselect `with-fingerprint`
-feature. `pam_fprintd` is `sufficient`, so a swipe can authenticate but the
-password prompt is always still there.
+`fprintd` alone does not ship) and wires `pam_fprintd` into PAM. `pam_fprintd`
+is `sufficient`, so a swipe can authenticate but the password prompt is always
+still there.
 
-| Target | PAM stack | Covered |
-|---|---|---|
-| `sudo`, `su`, `login` | `system-auth` | ✅ |
-| KDE lock screen | `kscreensaver`, `kcheckpass` → `system-auth` | ✅ |
-| KDE login greeter | `kde` / `kde-fingerprint` | ✅ |
-| polkit (GUI prompts) | falls back to `system-auth` | ✅ |
+How it wires depends on the distro, and it reports what it did:
+
+| Distro | Mechanism |
+|---|---|
+| Fedora / RHEL | `authselect enable-feature with-fingerprint` (tracked, reversible) |
+| Debian / Arch / other | edits the PAM service files directly, keeping `*.vfs491-bak` backups |
+
+PAM files that are *symlinks* into a shared target (Fedora's authselect-managed
+`system-auth` and friends) are skipped with a warning rather than edited through
+the link, since that would change a file other services share without a matching
+backup. Use `authselect` for those.
+
+| Target | PAM service(s) |
+|---|---|
+| `sudo`, `su`, `login` | `sudo`, `su`, `login` (and `system-auth` on Fedora) |
+| greeter / lock screen | `kde`, `kde-fingerprint`, `gdm-fingerprint`, `gdm-password`, `sddm`, `lightdm`, `lxdm`, `greetd`, `ly`, `kscreensaver`, `kcheckpass` |
+| polkit (GUI prompts) | `polkit-1` (created if your distro has no such file) |
 
 ```bash
-./enable-auth.sh            # install pam module + enable the feature
+./enable-auth.sh            # wire fingerprint into PAM
 ./enable-auth.sh --status   # show what is wired
-sudo authselect disable-feature with-fingerprint   # to undo
+./enable-auth.sh --undo     # reverse it
 ```
 
+If `pam_fprintd.so` is missing, the script tells you the package name for your
+distro (`fprintd-pam` on Fedora/`libpam-fprintd` on Debian, `fprintd` on Arch).
+It does not install packages for you.
+
 Test easiest first (`sudo true`, then `pkexec true`, then the lock screen).
-Cold-boot login works because `setup.sh` orders `plasmalogin` after
-`vfs491-bridge` (see its `plasmalogin.service.d/vfs491.conf` drop-in).
+For cold-boot login, both `setup.sh` and `enable-auth.sh` detect your actual
+display manager and order it after `vfs491-bridge` via a drop-in, so this is
+not tied to any one desktop.
 
 ## Use
 
@@ -79,8 +121,8 @@ Cold-boot login works because `setup.sh` orders `plasmalogin` after
 # one-off capture test (root); swipe when it says the sensor is armed (~2 s)
 sudo /usr/libexec/vfs491/vfs491-capture /tmp/fp.pgm
 
-sudo fprintd-enroll "$USER"
-sudo fprintd-verify "$USER"
+sudo fprintd-enroll "${SUDO_USER:-$USER}"
+sudo fprintd-verify "${SUDO_USER:-$USER}"
 journalctl -u fprintd | grep score      # e.g. "score 175/40"; >=40 is a match
 ```
 
@@ -108,16 +150,22 @@ pushes it into the "Open Sensor failed" wedge.
 ## Recovering a wedged sensor
 
 After many rapid captures the sensor can stop opening (`Sensor isn't detected`).
-A **USB re-enumeration** recovers it without a reboot:
+A **USB re-enumeration** recovers it without a reboot. The script finds the
+sensor by its USB IDs, so there is no port path to adjust:
 
 ```bash
-sudo sh -c 'echo 0 > /sys/bus/usb/devices/3-1.1/authorized; \
-            sleep 2; echo 1 > /sys/bus/usb/devices/3-1.1/authorized'
-lsusb | grep 138a
+./enable-auth.sh --reenumerate                            # or, by hand:
+sudo sh -c 'd=$(for x in /sys/bus/usb/devices/*/; do
+    [ "$(cat $x/idVendor 2>/dev/null)" = 138a ] &&
+    [ "$(cat $x/idProduct 2>/dev/null)" = 003d ] && echo ${x%/} && break
+  done)
+  echo 0 > "$d/authorized"; sleep 2; echo 1 > "$d/authorized"'
 sudo /usr/libexec/vfs491/vfs491-capture /tmp/fp.pgm     # should work again
 ```
 
-(Adjust the `3-1.1` path to the sensor's sysfs node if it differs.)
+The sysfs node (`3-1.1`, `1-1.4`, ...) is specific to your USB topology and
+differs between machines, docks and reboots, which is why we match on
+`138a:003d` instead of hard-coding it.
 
 ## Files
 

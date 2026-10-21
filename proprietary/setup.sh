@@ -1,26 +1,60 @@
 #!/usr/bin/env bash
-# Set up the proprietary-capture path for the VFS491 on Fedora.
+# Set up the proprietary-capture path for the VFS491 (distro-neutral).
 #
 #   ./proprietary/setup.sh            # fetch + unpack + gate-patch + install
 #
 # What it does (all under $STAGE unless noted; nothing from HP goes in the repo):
 #   1. Download SoftPaq sp84530 (Validity Sensor Setup 4.5-136.0) from HP.
-#   2. Unpack the RPM and gate-patch validity-sensor -> validity-sensor-unlocked.
+#   2. Unpack the RPM (rpm2cpio+cpio, bsdtar, or a built-in Python reader) and
+#      gate-patch validity-sensor -> validity-sensor-unlocked.
 #   3. Install the tool + the harvest/capture/bridge scripts into /usr/libexec/vfs491/.
 #   4. Install the systemd units for the bridge and the fprintd virtual_image drop-in.
+#
+# It does not call a package manager. It checks for what it needs and tells you
+# exactly what to install if something is missing, so it works on any distro.
 #
 # HP's tool is proprietary and is fetched from HP at run time, never redistributed.
 set -euo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=proprietary/vfs491-lib.sh
+. "$REPO/proprietary/vfs491-lib.sh"
+
 STAGE="${STAGE:-/tmp/opencode/hp}"
-LIBEXEC="/usr/libexec/vfs491"
+LIBEXEC="${LIBEXEC:-/usr/libexec/vfs491}"
 SP_URL="https://ftp.hp.com/pub/softpaq/sp84501-85000/sp84530.tar"
 SP_SHA256="dc9128f965532dd0140d9bcf662ef7a4180ba5fd182c5f8056119c0e967c0364"
 
-say() { printf '\033[1m==> %s\033[0m\n' "$*"; }
+say() { vfs_say "$@"; }
+
+# ---- 0. preflight ----------------------------------------------------------
+# Fail early, with an actionable message, rather than mid-way through.
+need() {
+  command -v "$1" >/dev/null 2>&1 || vfs_die "missing required tool: $1"
+}
+need curl
+need sha256sum
+need tar
+need python3
+need install
+
+# Unpacking HP's RPM: prefer whatever this distro has.
+rpm_unpacker() {
+  if command -v rpm2cpio >/dev/null 2>&1 && command -v cpio >/dev/null 2>&1; then
+    echo rpm2cpio
+  elif command -v bsdtar >/dev/null 2>&1; then
+    echo bsdtar
+  elif command -v 7z >/dev/null 2>&1; then
+    echo 7z
+  elif command -v python3 >/dev/null 2>&1; then
+    echo python
+  else
+    echo none
+  fi
+}
 
 mkdir -p "$STAGE"
+
 
 # ---- 1. download ----------------------------------------------------------
 if [[ ! -f "$STAGE/sp84530.tar" ]]; then
@@ -33,9 +67,34 @@ got="$(sha256sum "$STAGE/sp84530.tar" | awk '{print $1}')"
 # ---- 2. unpack + gate-patch ----------------------------------------------
 if [[ ! -x "$STAGE/validity-sensor-unlocked" ]]; then
   say "unpacking RPM"
+  rm -rf "$STAGE/root"
   mkdir -p "$STAGE/root"
   ( cd "$STAGE" && tar xf sp84530.tar )
-  ( cd "$STAGE/root" && rpm2cpio "$STAGE"/SP84530/*.rpm | cpio -idm 2>/dev/null )
+
+  # HP's tarball contains an SP* directory holding the RPM; don't assume its
+  # exact name, just find the one RPM inside.
+  rpm="$(find "$STAGE" -maxdepth 2 -name '*.rpm' -print -quit)"
+  [ -n "$rpm" ] || vfs_die "no .rpm found inside sp84530.tar"
+
+  case "$(rpm_unpacker)" in
+    rpm2cpio) ( cd "$STAGE/root" && rpm2cpio "$rpm" | cpio -idm --quiet ) ;;
+    bsdtar)   bsdtar -xf "$rpm" -C "$STAGE/root" ;;
+    7z)       ( cd "$STAGE/root" && 7z x -y "$rpm" >/dev/null
+                for c in *.cpio; do
+                  [ -e "$c" ] || continue
+                  7z x -y "$c" >/dev/null || vfs_die "7z failed to unpack $c"
+                done ) ;;
+    python)   say "unpacking with the built-in Python reader"
+              python3 "$REPO/tools/rpm_unpack.py" "$rpm" "$STAGE/root" ;;
+    *)        vfs_die "cannot unpack RPM: install one of
+                       - rpm2cpio + cpio  (rpm, cpio)
+                       - bsdtar           (libarchive / libarchive-tools)
+                       - 7z               (p7zip)
+                       Python 3 is also enough (no extra packages)" ;;
+  esac
+
+  vendorbin="$STAGE/root/usr/sbin/validity-sensor"
+  [ -f "$vendorbin" ] || vfs_die "expected $vendorbin after unpacking; HP may have repackaged"
 
   say "gate-patching validity-sensor"
   python3 - "$STAGE/root/usr/sbin/validity-sensor" "$STAGE/validity-sensor-unlocked" <<'PY'
@@ -52,26 +111,53 @@ fi
 
 # ---- 3. install -----------------------------------------------------------
 say "installing to $LIBEXEC (needs root)"
-sudo install -d -m 0755 "$LIBEXEC"
-sudo install -m 0755 "$STAGE/validity-sensor-unlocked" "$LIBEXEC/validity-sensor-unlocked"
-sudo install -m 0644 "$REPO/proprietary/harvest.py" "$LIBEXEC/harvest.py"
-sudo install -m 0755 "$REPO/proprietary/capture.py" "$LIBEXEC/capture.py"
-sudo install -m 0755 "$REPO/proprietary/bridge.py"  "$LIBEXEC/bridge.py"
+vfs_sudo install -d -m 0755 "$LIBEXEC"
+vfs_sudo install -m 0755 "$STAGE/validity-sensor-unlocked" "$LIBEXEC/validity-sensor-unlocked"
+vfs_sudo install -m 0644 "$REPO/proprietary/harvest.py" "$LIBEXEC/harvest.py"
+vfs_sudo install -m 0755 "$REPO/proprietary/capture.py" "$LIBEXEC/capture.py"
+vfs_sudo install -m 0755 "$REPO/proprietary/bridge.py"  "$LIBEXEC/bridge.py"
 
 say "installing vfs491-capture wrapper"
-sudo install -m 0755 /dev/stdin "$LIBEXEC/vfs491-capture" <<'SH'
+vfs_sudo install -m 0755 /dev/stdin "$LIBEXEC/vfs491-capture" <<SH
 #!/usr/bin/env bash
 # One swipe -> PGM, via HP's tool under gdb. Root.
-export VFS491_TOOL=/usr/libexec/vfs491/validity-sensor-unlocked
-export VFS491_HARVEST=/usr/libexec/vfs491/harvest.py
-export PATH=/usr/bin:/bin
-exec python3 /usr/libexec/vfs491/capture.py "$@"
+export VFS491_TOOL=${LIBEXEC}/validity-sensor-unlocked
+export VFS491_HARVEST=${LIBEXEC}/harvest.py
+exec python3 ${LIBEXEC}/capture.py "\$@"
 SH
 
 # ---- 4. systemd units -----------------------------------------------------
+if ! vfs_have_systemd; then
+  vfs_warn "systemd not detected; skipping unit installation"
+  vfs_warn "you will need to run the bridge some other way:"
+  vfs_warn "  FP_VIRTUAL_IMAGE=/run/fprint/virtimg_sock python3 $LIBEXEC/bridge.py"
+  cat <<EOF
+
+Installed the tool and scripts to $LIBEXEC.
+Skipped systemd units (no systemd).
+
+Test one capture first (root, swipe when it says 'SWIPE NOW'):
+  $LIBEXEC/vfs491-capture /tmp/fp.pgm
+EOF
+  exit 0
+fi
+
+PYTHON="$(command -v python3 || vfs_die 'python3 not found')"
+
+say "checking libfprint provides the virtual_image driver"
+# The whole path depends on libfprint honouring FP_VIRTUAL_IMAGE. Verify rather
+# than assume, so a wrong libfprint fails loudly here instead of silently later.
+# Search multiarch dirs too (Debian uses /usr/lib/<triplet>/).
+if ! grep -rqs 'FP_VIRTUAL_IMAGE' /usr/lib*/libfprint-2.so* /usr/lib/*/libfprint-2.so* 2>/dev/null; then
+  vfs_warn "this libfprint does not look like it supports FP_VIRTUAL_IMAGE"
+  vfs_warn "the bridge will not be able to hand images to fprintd."
+  vfs_warn "libfprint >= 1.94.100 with the virtual_image driver is required."
+  vfs_warn "continuing anyway; install a suitable libfprint if swipes fail."
+fi
+
 say "installing systemd units"
-sudo install -d -m 0755 /etc/systemd/system/fprintd.service.d
-sudo install -m 0644 /dev/stdin /etc/systemd/system/fprintd.service.d/virtual-image.conf <<'CONF'
+vfs_sudo install -d -m 0755 /etc/systemd/system/fprintd.service.d
+vfs_sudo install -m 0644 /dev/stdin /etc/systemd/system/fprintd.service.d/virtual-image.conf <<'CONF'
 [Service]
 # Point fprintd at libfprint's virtual_image driver instead of a USB driver.
 Environment=FP_VIRTUAL_IMAGE=/run/fprint/virtimg_sock
@@ -80,7 +166,7 @@ Environment=G_MESSAGES_DEBUG=libfprint-print
 RuntimeDirectory=fprint
 CONF
 
-sudo install -m 0644 /dev/stdin /etc/systemd/system/vfs491-bridge.service <<'UNIT'
+vfs_sudo install -m 0644 /dev/stdin /etc/systemd/system/vfs491-bridge.service <<UNIT
 [Unit]
 Description=VFS491 fingerprint capture bridge (feeds fprintd's virtual_image)
 # Start as soon as the basic system is up so the sensor is ready before any
@@ -91,10 +177,10 @@ Before=multi-user.target
 [Service]
 Type=simple
 Environment=FP_VIRTUAL_IMAGE=/run/fprint/virtimg_sock
-Environment=VFS491_CAPTURE=/usr/libexec/vfs491/capture.py
-Environment=VFS491_TOOL=/usr/libexec/vfs491/validity-sensor-unlocked
-Environment=VFS491_HARVEST=/usr/libexec/vfs491/harvest.py
-ExecStart=/usr/bin/python3 /usr/libexec/vfs491/bridge.py
+Environment=VFS491_CAPTURE=${LIBEXEC}/capture.py
+Environment=VFS491_TOOL=${LIBEXEC}/validity-sensor-unlocked
+Environment=VFS491_HARVEST=${LIBEXEC}/harvest.py
+ExecStart=${PYTHON} ${LIBEXEC}/bridge.py
 Restart=always
 RestartSec=2
 
@@ -103,29 +189,35 @@ WantedBy=multi-user.target
 UNIT
 
 # Make the login greeter wait for the bridge, so a tearless cold-boot login can
-# offer a finger. plasmalogin is SDDM-derived; extend it rather than edit it.
-if systemctl list-unit-files plasmalogin.service >/dev/null 2>&1; then
-  say "ordering plasmalogin after vfs491-bridge"
-  sudo install -d -m 0755 /etc/systemd/system/plasmalogin.service.d
-  sudo install -m 0644 /dev/stdin /etc/systemd/system/plasmalogin.service.d/vfs491.conf <<'DROP'
+# offer a finger. Detect which greeter is actually installed rather than
+# assuming Plasma; extend it with a drop-in rather than editing it.
+if greeter="$(vfs_greeter_unit)"; then
+  say "ordering ${greeter} after vfs491-bridge"
+  vfs_sudo install -d -m 0755 "/etc/systemd/system/${greeter}.d"
+  vfs_sudo install -m 0644 /dev/stdin "/etc/systemd/system/${greeter}.d/vfs491.conf" <<'DROP'
 [Unit]
 After=vfs491-bridge.service
 Wants=vfs491-bridge.service
 DROP
+else
+  vfs_warn "no known display manager found; cold-boot fingerprint login may race"
+  vfs_warn "the bridge will still work once you are logged in"
 fi
 
 say "reloading systemd"
-sudo systemctl daemon-reload
+vfs_sudo systemctl daemon-reload
 
 cat <<EOF
 
 Done. Next:
-  1. Make the native vfs491 driver NOT grab the USB device (comment out the udev
-     rule / blacklist it) so HP's tool gets exclusive access. See docs/capture.md.
-  2. sudo systemctl enable --now vfs491-bridge.service
-  3. sudo systemctl restart fprintd
-  4. Test one capture first:
-        sudo /usr/libexec/vfs491/vfs491-capture /tmp/fp.pgm
-     (it prints when it is ready ~2 s in; swipe then, slowly and evenly)
-  5. Then:  sudo fprintd-enroll    and    sudo fprintd-verify
+  1. If you installed the open native driver, make sure it is NOT grabbing the
+     USB device, so HP's tool gets exclusive access: blacklist the module or
+     remove the udev rule it installed. (The working path does not need the
+     native driver at all -- skip this if you never built it.)
+  2. systemctl enable --now vfs491-bridge.service
+  3. systemctl restart fprintd
+  4. Test one capture first (as root):
+        $LIBEXEC/vfs491-capture /tmp/fp.pgm
+     (it prints 'SWIPE NOW' when armed ~2 s in; swipe then, slowly and evenly)
+  5. Then:  fprintd-enroll "$(vfs_auth_user)"  and  fprintd-verify "$(vfs_auth_user)"
 EOF
