@@ -50,6 +50,30 @@ tool's `main()` guard, installs `validity-sensor-unlocked` + these scripts into
 HP's tool is proprietary and is **downloaded from HP at setup time, never
 committed**.
 
+## Using it for authentication
+
+`./enable-auth.sh` installs `fprintd-pam` (provides `pam_fprintd.so`, which
+`fprintd` alone does not ship) and enables the authselect `with-fingerprint`
+feature. `pam_fprintd` is `sufficient`, so a swipe can authenticate but the
+password prompt is always still there.
+
+| Target | PAM stack | Covered |
+|---|---|---|
+| `sudo`, `su`, `login` | `system-auth` | ✅ |
+| KDE lock screen | `kscreensaver`, `kcheckpass` → `system-auth` | ✅ |
+| KDE login greeter | `kde` / `kde-fingerprint` | ✅ |
+| polkit (GUI prompts) | falls back to `system-auth` | ✅ |
+
+```bash
+./enable-auth.sh            # install pam module + enable the feature
+./enable-auth.sh --status   # show what is wired
+sudo authselect disable-feature with-fingerprint   # to undo
+```
+
+Test easiest first (`sudo true`, then `pkexec true`, then the lock screen).
+Cold-boot login works because `setup.sh` orders `plasmalogin` after
+`vfs491-bridge` (see its `plasmalogin.service.d/vfs491.conf` drop-in).
+
 ## Use
 
 ```bash

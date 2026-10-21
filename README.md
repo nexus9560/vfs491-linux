@@ -43,6 +43,17 @@ journalctl -u vfs491-bridge -f                      # prints "SWIPE NOW" when ar
 See [`proprietary/README.md`](proprietary/README.md) for the architecture,
 timing, and recovery from a wedged sensor.
 
+## Use it for authentication (sudo, polkit, login, lock screen)
+
+```bash
+./proprietary/enable-auth.sh        # installs fprintd-pam + enables with-fingerprint
+```
+
+Fingerprint is offered for `sudo`, `su`, `login`, the KDE lock screen, the KDE
+greeter, and polkit prompts. The password prompt always remains as a fallback.
+Undo with `sudo authselect disable-feature with-fingerprint`. Details in
+[`proprietary/README.md`](proprietary/README.md).
+
 ## Why it has to be written from scratch
 
 The only libfprint integrations that support `138a:003d`

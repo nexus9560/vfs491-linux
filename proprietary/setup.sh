@@ -83,7 +83,10 @@ CONF
 sudo install -m 0644 /dev/stdin /etc/systemd/system/vfs491-bridge.service <<'UNIT'
 [Unit]
 Description=VFS491 fingerprint capture bridge (feeds fprintd's virtual_image)
-After=multi-user.target
+# Start as soon as the basic system is up so the sensor is ready before any
+# login greeter asks for a finger; stop only at shutdown.
+After=basic.target
+Before=multi-user.target
 
 [Service]
 Type=simple
@@ -98,6 +101,18 @@ RestartSec=2
 [Install]
 WantedBy=multi-user.target
 UNIT
+
+# Make the login greeter wait for the bridge, so a tearless cold-boot login can
+# offer a finger. plasmalogin is SDDM-derived; extend it rather than edit it.
+if systemctl list-unit-files plasmalogin.service >/dev/null 2>&1; then
+  say "ordering plasmalogin after vfs491-bridge"
+  sudo install -d -m 0755 /etc/systemd/system/plasmalogin.service.d
+  sudo install -m 0644 /dev/stdin /etc/systemd/system/plasmalogin.service.d/vfs491.conf <<'DROP'
+[Unit]
+After=vfs491-bridge.service
+Wants=vfs491-bridge.service
+DROP
+fi
 
 say "reloading systemd"
 sudo systemctl daemon-reload
