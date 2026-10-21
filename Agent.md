@@ -10,7 +10,7 @@ This document records the goals, approach, and key prompts used to bring this pr
 ## Goals
 1. Make the project system-agnostic so it could be cloned and used on other EliteBook 8770w machines across distros (Debian, Arch, Fedora, etc.).
 2. Remove machine/user-specific assumptions (paths, usernames, USB topology, greeters, package managers).
-3. Keep all artifacts under `~/source/repos/fingerprint-sensor` and never commit vendor blobs/captures/fingerprints.
+3. Never commit vendor blobs/captures/fingerprints.
 4. Preserve the working capture path and the ability to wire PAM/auth.
 5. Document limitations (e.g. `build/libfprint.tgz` required for the research path) without over-claiming support.
 
