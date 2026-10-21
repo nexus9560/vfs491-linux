@@ -2,7 +2,7 @@
  * vfs491.c -- libfprint driver for the Validity Sensors VFS491
  *             (USB 138a:003d, HP EliteBook 8770w and friends).
  *
- * Copyright (C) 2026
+ * Copyright (C) 2026 nexus9560 and contributors
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public

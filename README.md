@@ -258,6 +258,15 @@ sudo dnf install -y wireshark-cli        # optional: pcap instead of text API
 
 ## License
 
-Our own files here: MIT. Cloned prior art keeps its own license (both
-`vfs495-linux` and `nixos-validity-VFS491` are MIT); HP's Validity software is
-proprietary and is not included.
+Two licenses, both permissive of derivative works — see [`LICENSE`](LICENSE):
+
+* **MIT** — the tooling, bridge, capture/harvest scripts, build scripts and
+  documentation (everything except the driver). Some of these files are
+  *adapted from* the MIT prior art `vfs495-linux` and `nixos-validity-VFS491`,
+  whose terms are preserved.
+* **LGPL-2.1-or-later** — `driver/vfs491.c`, its `.inc`, and the libfprint
+  patch. A libfprint driver has to be LGPL so it can link with libfprint; each
+  file says so in its header.
+
+HP's Validity software is proprietary, is not included, and is not covered by
+either license — you fetch it from HP yourself at setup time.

@@ -1,0 +1,92 @@
+This project is open source, under two licenses depending on the file.
+Both allow derivative works.
+
+===============================================================================
+1. Tooling, scripts, bridge, capture, and documentation: MIT
+===============================================================================
+
+Applies to everything in this repository EXCEPT the files listed in section 2.
+That includes (non-exhaustively): proprietary/bridge.py, proprietary/harvest.py,
+proprietary/capture.py, proprietary/setup.sh, proprietary/enable-auth.sh,
+capture/**, tools/**, docs/**, the build scripts, the Makefiles, and this
+project's own prose.
+
+Note: several of these files are adapted from the MIT-licensed prior art
+saifulmd0/vfs495-linux and mbtech-nl/nixos-validity-VFS491; their MIT terms are
+preserved here.
+
+MIT License
+
+Copyright (c) 2026 nexus9560 and contributors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+===============================================================================
+2. The libfprint driver and its patch: LGPL-2.1-or-later
+===============================================================================
+
+Applies to:
+
+    driver/vfs491.c
+    libfprint-1.94.100-vfs491.patch   (the libfprint driver source it adds)
+
+(Note: `driver/vfs491_descramble.inc` is a license-neutral data table with no
+header of its own; it is covered by the MIT license in section 1.)
+
+These are a libfprint driver and are therefore licensed under the GNU Lesser
+General Public License, version 2.1 or (at your option) any later version, so
+that they may be linked with libfprint. Each file states this in its own header.
+
+    Copyright (C) 2026 nexus9560 and contributors
+
+    This library is free software; you can redistribute it and/or modify it
+    under the terms of the GNU Lesser General Public License as published by
+    the Free Software Foundation; either version 2.1 of the License, or (at
+    your option) any later version.
+
+    This library is distributed in the hope that it will be useful, but
+    WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY
+    or FITNESS FOR A PARTICULAR PURPOSE. See the GNU Lesser General Public
+    License for more details.
+
+You should have received a copy of the GNU Lesser General Public License along
+with this library; if not, see <https://www.gnu.org/licenses/>.
+
+===============================================================================
+3. What is NOT covered, because it is not here
+===============================================================================
+
+No license is granted, or implied, for any third-party material that this
+repository does not contain and never redistributes:
+
+  * HP / Validity `validity-sensor` and its RAM patches are proprietary and are
+    downloaded from HP by the user at setup time. They are not part of this
+    project and are not covered by either license above.
+  * Reference checkouts under `reference/` are not tracked in this repository;
+    if you clone them they keep their own upstream licenses.
+  * Captured fingerprint images, USB captures, and session keys are produced
+    locally and are never committed.
+
+===============================================================================
+4. No warranty, and not a security product
+===============================================================================
+
+The Software is provided "as is", with no warranty. It drives real fingerprint
+hardware and can be wired into PAM authentication; you are responsible for
+keeping a working password fallback and for testing it yourself. See README.md.
