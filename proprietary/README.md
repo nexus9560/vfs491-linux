@@ -53,7 +53,7 @@ committed**.
 ## Use
 
 ```bash
-# one-off capture test (root); swipe ~3 s after it starts, slowly and evenly
+# one-off capture test (root); swipe when it says the sensor is armed (~2 s)
 sudo /usr/libexec/vfs491/vfs491-capture /tmp/fp.pgm
 
 sudo fprintd-enroll mpryzlwyn
@@ -61,13 +61,48 @@ sudo fprintd-verify mpryzlwyn
 journalctl -u fprintd | grep score      # e.g. "score 175/40"; >=40 is a match
 ```
 
+## Timing and responsiveness
+
+Measured on this machine (one capture, from tool start to image):
+
+| Phase | Cost | Notes |
+|---|---|---|
+| gdb start + load the 2.8 MB tool | ~0.7 s | unavoidable with gdb |
+| **sensor init** (patch upload + SSL + calibration, ~25 USB writes) | **~1.4 s** | HP's code; the dominant cost |
+| armed → waiting for the finger | — | the sensor is listening from ~2.0 s |
+| capture + reconstruct | **~0.14 s** | the sensor itself is fast |
+
+So a capture is ~4–5 s wall-clock, but **~2.1 s is fixed overhead** and the rest is
+the swipe itself. The **armed signal** (`SensorGetPrintWait` at `0x43eb20`, entered
+once init finishes) fires at ~2.0 s and is what the bridge uses to print
+`SWIPE NOW`, instead of guessing — swipe at that point and the first try lands.
+
+Init is redone on every capture (the sensor does not cache it), so a repeated
+capture is not faster. The path is deliberately **one attempt per prompt**: a blind
+retry doubles the wait and hammers the sensor's USB open/close path, which is what
+pushes it into the "Open Sensor failed" wedge.
+
+## Recovering a wedged sensor
+
+After many rapid captures the sensor can stop opening (`Sensor isn't detected`).
+A **USB re-enumeration** recovers it without a reboot:
+
+```bash
+sudo sh -c 'echo 0 > /sys/bus/usb/devices/3-1.1/authorized; \
+            sleep 2; echo 1 > /sys/bus/usb/devices/3-1.1/authorized'
+lsusb | grep 138a
+sudo /usr/libexec/vfs491/vfs491-capture /tmp/fp.pgm     # should work again
+```
+
+(Adjust the `3-1.1` path to the sensor's sysfs node if it differs.)
+
 ## Files
 
 | File | Purpose |
 |---|---|
-| `harvest.py` | gdb script: breakpoint at `IRqualityDetermination` (`0x4689b0`), copies the assembled image out |
+| `harvest.py` | gdb script: breakpoint at `IRqualityDetermination` (`0x4689b0`), copies the assembled image out; touches `$VFS_ARMED` when `SensorGetPrintWait` is entered |
 | `capture.py` | one swipe → PGM, via gdb + `harvest.py` |
-| `bridge.py` | event-driven: one capture per `finger-needed`, delivers to the `virtual_image` socket |
+| `bridge.py` | event-driven: one capture per `finger-needed`, delivers to the `virtual_image` socket; logs `SWIPE NOW` on the armed signal |
 | `setup.sh` | fetch + verify + unpack + gate-patch + install units |
 
 Adapted from [saifulmd0/vfs495-linux](https://github.com/saifulmd0/vfs495-linux)

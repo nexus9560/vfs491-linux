@@ -14,6 +14,7 @@ import struct
 import subprocess
 import sys
 import tempfile
+import time
 
 TOOL = os.environ["VFS491_TOOL"]        # gate-patched validity-sensor
 HARVEST = os.environ["VFS491_HARVEST"]  # harvest.py
@@ -24,7 +25,18 @@ def main():
         sys.exit("usage: vfs491-capture OUT.pgm")
     fd, asm = tempfile.mkstemp(suffix=".bin")
     os.close(fd)
-    cmd = ["gdb", "-q", "-batch", "-x", HARVEST, "--args", TOOL]
+    armed = os.environ.get("VFS_ARMED")
+    if armed:
+        try:
+            os.unlink(armed)
+        except OSError:
+            pass
+    # -nx -batch: skip init files and be non-interactive. debuginfod would
+    # otherwise try to fetch debuginfo over the network before running.
+    cmd = ["gdb", "-q", "-nx", "-batch",
+           "-ex", "set debuginfod enabled off",
+           "-x", HARVEST, "--args", TOOL]
+    t0 = time.monotonic()
     try:
         subprocess.run(cmd, env={**os.environ, "VFS_ASM_OUT": asm},
                        timeout=int(os.environ.get("VFS_TIMEOUT", "75")),
@@ -37,12 +49,12 @@ def main():
     finally:
         os.unlink(asm)
     if len(d) < 16:
-        print("no finger captured", file=sys.stderr)
+        print(f"no finger captured (after {time.monotonic()-t0:.1f}s)", file=sys.stderr)
         return 10
     w, h = struct.unpack("<II", d[:8])
     with open(sys.argv[1], "wb") as f:
         f.write(f"P5\n{w} {h}\n255\n".encode() + d[8:8 + w * h])
-    print(f"captured {w}x{h} -> {sys.argv[1]}")
+    print(f"captured {w}x{h} -> {sys.argv[1]} (after {time.monotonic()-t0:.1f}s)")
     return 0
 
 

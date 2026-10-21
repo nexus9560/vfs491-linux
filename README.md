@@ -34,13 +34,14 @@ cd ~/source/repos/fingerprint-sensor
 sudo systemctl enable --now vfs491-bridge.service
 sudo systemctl restart fprintd
 
-sudo fprintd-enroll mpryzlwyn                       # swipe ~3 s after each prompt, slowly
+sudo fprintd-enroll mpryzlwyn                       # swipe when the sensor is armed (~2 s)
 sudo fprintd-verify mpryzlwyn                       # -> verify-match
 journalctl -u fprintd | grep score                  # e.g. "score 175/40" (>=40 = match)
+journalctl -u vfs491-bridge -f                      # prints "SWIPE NOW" when armed
 ```
 
-See [`proprietary/README.md`](proprietary/README.md) for the architecture and
-swiping tips.
+See [`proprietary/README.md`](proprietary/README.md) for the architecture,
+timing, and recovery from a wedged sensor.
 
 ## Why it has to be written from scratch
 

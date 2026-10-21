@@ -11,10 +11,77 @@
 # Adapted from saifulmd0/vfs495-linux and mbtech-nl/nixos-validity-VFS491 (both MIT),
 # plus a guard against the short/fast-swipe case where the breakpoint fires with
 # bad dimensions.
-import gdb, os, struct
+#
+# Env:
+#   VFS_ASM_OUT   where to write the harvested image (required)
+#   VFS_LED_LOG   if set, also log a timeline of pipeline breakpoints (diagnostics)
+#   VFS_ARMED     if set, touched the first time the sensor is armed and idle
+#                 (init traffic has stopped, so a swipe will now register)
+import gdb, os, struct, time
 
 OUT = os.environ["VFS_ASM_OUT"]
+LED_LOG = os.environ.get("VFS_LED_LOG")
+ARMED = os.environ.get("VFS_ARMED")
 hits = {"n": 0}
+T0 = time.monotonic()
+# Init (patch upload + SSL + calibration) is a burst of scsSSLAppDataWrite calls
+# that then goes quiet: that quiet point is when the sensor is listening. We only
+# care about the first quiet gap, and only during the pre-swipe phase.
+_last_write = [0.0]
+_armed = [False]
+
+
+def _touch_armed():
+    if _armed[0]:
+        return
+    _armed[0] = True
+    if ARMED:
+        try:
+            open(ARMED, "w").close()
+        except OSError:
+            pass
+
+if LED_LOG:
+    _log = open(LED_LOG, "w", buffering=1)
+
+    def mark(msg):
+        _log.write("%7.3f  %s\n" % (time.monotonic() - T0, msg))
+
+    # vcsSensorLEDReadyForSwipe is the "sensor is armed, swipe now" signal. The
+    # others bound the swipe: Accepted/Rejected mark the outcome.
+    for name, addr in {
+        "vcsSensorLEDReadyForSwipe": 0x454880,
+        "vcsSensorLEDSwipeAccepted": 0x4547c0,
+        "IRqualityDetermination": 0x4689b0,
+        "scsSSLAppDataWrite": 0x514d10,
+    }.items():
+        class _M(gdb.Breakpoint):
+            def __init__(self, n, a):
+                super().__init__("*0x%x" % a, internal=True)
+                self.n = n
+
+            def stop(self):
+                mark(self.n)
+                return False
+
+        try:
+            _M(name, addr)
+        except Exception as e:
+            mark("SETFAIL %s: %s" % (name, e))
+    mark("bps set")
+
+
+# SensorGetPrintWait (0x43eb20) is entered exactly when the sensor has finished
+# init and is now listening for a finger. That is the "swipe now" moment.
+class AtArmed(gdb.Breakpoint):
+    def stop(self):
+        if LED_LOG:
+            mark("ARMED (sensor listening)")
+        _touch_armed()
+        return False
+
+
+AtArmed("*0x43eb20", internal=True)
 
 
 class AtQuality(gdb.Breakpoint):
@@ -43,4 +110,6 @@ class AtQuality(gdb.Breakpoint):
 AtQuality("*0x4689b0", internal=True)
 gdb.execute("run getprintwait -doinit")
 print("ASM_HITS", hits["n"])
+if LED_LOG:
+    mark("tool exited")
 gdb.execute("quit")

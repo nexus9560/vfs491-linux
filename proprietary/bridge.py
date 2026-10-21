@@ -55,12 +55,25 @@ def deliver(w, h, data):
 
 def run_capture(out):
     """One capture attempt. Returns True if an image was written to `out`."""
+    armed = RUN + "/armed"
+    try:
+        os.unlink(armed)
+    except OSError:
+        pass
     p = subprocess.Popen([sys.executable, CAPTURE, out],
-                         env={**os.environ, "VFS_TIMEOUT": "70"},
+                         env={**os.environ, "VFS_TIMEOUT": "70", "VFS_ARMED": armed},
                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                          start_new_session=True)
     with lock:
         state["proc"] = p
+    # Watch for the armed marker and tell the user exactly when to swipe.
+    def watch():
+        while p.poll() is None:
+            if os.path.exists(armed):
+                log("sensor armed -> SWIPE NOW (slowly, full length)")
+                return
+            time.sleep(0.05)
+    threading.Thread(target=watch, daemon=True).start()
     rc = p.wait()
     with lock:
         state["proc"] = None
@@ -84,28 +97,28 @@ def capture_and_deliver(gen):
     out, last = RUN + "/cap.pgm", RUN + "/last.pgm"
     t0 = time.monotonic()
     try:
-        for attempt in range(2):                       # a swipe can straddle the window; try twice
-            ok = run_capture(out)
-            if state["gen"] != gen or not state["wanted"]:
-                log("capture cancelled (fprintd no longer waiting)")
-                return
-            if ok:
-                img = read_pgm(out)
-                os.replace(out, last)
-                if img[1] < MIN_ROWS:
-                    log(f"sensor returned a tiny scan ({img[0]}x{img[1]}): swipe too short/fast, "
-                        "or the sensor is in its stuck state (then: full power-off, not a reboot)")
-                    ok = False
-                else:
-                    try:
-                        deliver(*img)
-                        log(f"delivered scan {img[0]}x{img[1]} after {time.monotonic()-t0:.1f}s")
-                        return
-                    except OSError as e:
-                        log(f"deliver failed: {e}")
-                        return
-            if not ok:
-                log("no usable finger scan" + (", retrying" if attempt == 0 else " (give up)"))
+        # A single attempt. A blind retry doubles the wait and hammers the sensor's
+        # USB open/close path -- the known cause of its "Open Sensor failed" wedge.
+        # If the swipe misses, fprintd asks again on the next prompt; failing fast is
+        # both quicker and kinder to the hardware.
+        ok = run_capture(out)
+        if state["gen"] != gen or not state["wanted"]:
+            log("capture cancelled (fprintd no longer waiting)")
+            return
+        if not ok:
+            log("no usable finger scan (single attempt; swipe again when prompted)")
+            return
+        img = read_pgm(out)
+        os.replace(out, last)
+        if img[1] < MIN_ROWS:
+            log(f"sensor returned a tiny scan ({img[0]}x{img[1]}): swipe too short/fast, "
+                "or the sensor is in its stuck state (recover with a USB re-enumeration)")
+            return
+        try:
+            deliver(*img)
+            log(f"delivered scan {img[0]}x{img[1]} after {time.monotonic()-t0:.1f}s")
+        except OSError as e:
+            log(f"deliver failed: {e}")
     finally:
         try:
             os.unlink(out)

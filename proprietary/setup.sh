@@ -111,6 +111,6 @@ Done. Next:
   3. sudo systemctl restart fprintd
   4. Test one capture first:
         sudo /usr/libexec/vfs491/vfs491-capture /tmp/fp.pgm
-     (swipe ~3 s after it starts, slowly and evenly)
+     (it prints when it is ready ~2 s in; swipe then, slowly and evenly)
   5. Then:  sudo fprintd-enroll    and    sudo fprintd-verify
 EOF
