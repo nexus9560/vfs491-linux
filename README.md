@@ -110,9 +110,24 @@ captures/                capture output (not committed)
 
 ## Build
 
-Everything lives under this repository. The first run unpacks the bundled
-upstream tarball into `build/libfprint-v1.94.100/`, applies
-`libfprint-1.94.100-vfs491.patch`, and configures `build/lfp-full-build/`:
+> **A fresh clone cannot run this yet.** `build/libfprint.tgz` is git-ignored
+> (it is a 1 MB upstream tarball, not our code), so you have to supply it once
+> yourself before `./build-libfprint.sh` will work:
+>
+> ```bash
+> mkdir -p build
+> curl -fL -o build/libfprint.tgz \
+>   https://gitlab.freedesktop.org/libfprint/libfprint/-/archive/v1.94.100/libfprint-v1.94.100.tar.gz
+> # (or point at any 1.94.100 source tarball you already have)
+> ```
+>
+> This only affects the **research path** below. The working capture path in
+> [`proprietary/`](proprietary/README.md) does not need libfprint built, and
+> needs nothing from `build/`.
+
+Everything else lives under this repository. The first run unpacks the tarball
+into `build/libfprint-v1.94.100/`, applies `libfprint-1.94.100-vfs491.patch`,
+and configures `build/lfp-full-build/`:
 
 ```bash
 ./build-libfprint.sh
