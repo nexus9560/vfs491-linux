@@ -1,0 +1,33 @@
+# Local build output and captures (never commit these)
+build/
+captures/
+capture/dumps/
+*.pgm
+
+# Third-party prior art, cloned on demand (see README)
+reference/
+
+# HP/Synaptics proprietary reference artifacts -- research only, never committed
+# (see docs/hp-artifacts.md). These normally live outside the repo; this is a
+# safety net in case one is ever copied in.
+sp84530*
+validity-sensor
+validity-sensor-unlocked
+vcsFPService
+HPUsbVFS*.img
+hp-patches/
+# the proprietary path fetches HP's tool into a staging dir at setup time
+proprietary/validity-sensor*
+
+# Offline harness build output
+tools/standalone/*.o
+tools/standalone/replay_assembly
+tools/standalone/driver_crypto_selftest
+
+# Local debug logs
+journallog*.txt
+
+# Local virtualenvs, if any
+.venv/
+__pycache__/
+*.pyc
