@@ -7,6 +7,8 @@ distribution, package manager, username, or desktop. The driver is open source
 and contains no vendor code; HP's RAM patches are loaded at runtime from files
 the user supplies and are never committed here.
 
+> **Attribution:** This project was directed by **Nex**. The majority of the implementation, refactoring, debugging, and hardening was performed by an AI agent, with direction and testing done by Nex. See [`Agent.md`](Agent.md) for a breakdown of the approach taken.
+
 Status: **working on hardware.** Two paths are documented here.
 
 * **Working path (in use):** HP's proprietary tool handles the sensor's secure
