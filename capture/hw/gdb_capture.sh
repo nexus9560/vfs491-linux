@@ -60,7 +60,9 @@ if [[ ! -f "${USBLOG}" ]]; then
   REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")"/../.. && pwd)"
   # fallback
   if [[ ! -d "${REPO}/reference/nixos-validity-VFS491/research" ]]; then
-    REPO=/home/mpryzlwyn/source/repos/fingerprint-sensor
+    echo "ERROR: reference/nixos-validity-VFS491 not found under ${REPO}" >&2
+    echo "Clone it (see README) or set REPO=<path> in the environment." >&2
+    exit 1
   fi
   echo "Building usblog.so from ${REPO}/reference/nixos-validity-VFS491/research/usblog.c"
   cc -shared -fPIC -O2 -o "${USBLOG}" "${REPO}/reference/nixos-validity-VFS491/research/usblog.c" -ldl

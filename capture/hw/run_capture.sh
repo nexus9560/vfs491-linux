@@ -31,7 +31,8 @@ CMD="${CMD:-02 20 01 ff 03 15 00 08 00 00 00 00 00 20 28 00 00}"
 IMG="${IMG:-/tmp/opencode/image.bin}"
 
 # Client
-CLIENT="${CLIENT:-/home/mpryzlwyn/source/repos/fingerprint-sensor/build/vfs491_ssl}"
+REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+CLIENT="${CLIENT:-${REPO}/build/vfs491_ssl}"
 
 exec > >(tee -a "${LOG}") 2>&1
 
@@ -59,7 +60,7 @@ done
 
 if [[ ! -x "${CLIENT}" ]]; then
   echo "ERROR: client not built: ${CLIENT}" >&2
-  echo "Build: cd /home/mpryzlwyn/source/repos/fingerprint-sensor && make" >&2
+  echo "Build: cd ${REPO} && make" >&2
   exit 1
 fi
 

@@ -14,7 +14,7 @@ exec > >(tee -a "${LOG}") 2>&1
 HP_ROOT="${HP_ROOT:-/tmp/opencode/hp/root}"
 VNDIR="${VNDIR:-/tmp/opencode/vendor}"
 OUT_PATCHES="${OUT_PATCHES:-/tmp/opencode/hp-patches}"
-REPO=/home/mpryzlwyn/source/repos/fingerprint-sensor
+REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
 echo "=== regen_vendor_artifacts ==="
 date

@@ -80,8 +80,8 @@ Cold-boot login works because `setup.sh` orders `plasmalogin` after
 # one-off capture test (root); swipe when it says the sensor is armed (~2 s)
 sudo /usr/libexec/vfs491/vfs491-capture /tmp/fp.pgm
 
-sudo fprintd-enroll mpryzlwyn
-sudo fprintd-verify mpryzlwyn
+sudo fprintd-enroll "$USER"
+sudo fprintd-verify "$USER"
 journalctl -u fprintd | grep score      # e.g. "score 175/40"; >=40 is a match
 ```
 
