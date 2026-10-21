@@ -160,7 +160,7 @@ mkdir -p root && cd root
 rpm2cpio ../SP84530/Validity-Sensor-Setup-4.5-136.0.x86_64.rpm | cpio -idm
 
 # 2. extract the patch blobs (our tool; reads the vendor binary)
-cd ~/source/repos/fingerprint-sensor
+#    run from the repo root
 python3 tools/hp_extract.py /tmp/opencode/hp/root/usr/sbin/validity-sensor \
         -o /tmp/opencode/hp-patches
 

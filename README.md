@@ -26,10 +26,10 @@ runtime from `/usr/libexec/vfs491/` (override with `FP_VFS491_DIR`). See
 
 ## Get it working (working path)
 
-On this machine the sensor already works end to end:
+On this machine the sensor already works end to end. Clone the repo anywhere
+and run everything below from its root:
 
 ```bash
-cd ~/source/repos/fingerprint-sensor
 ./proprietary/setup.sh                              # fetch + patch + install (sudo)
 sudo systemctl enable --now vfs491-bridge.service
 sudo systemctl restart fprintd
@@ -100,7 +100,6 @@ upstream tarball into `build/libfprint-v1.94.100/`, applies
 `libfprint-1.94.100-vfs491.patch`, and configures `build/lfp-full-build/`:
 
 ```bash
-cd ~/source/repos/fingerprint-sensor
 ./build-libfprint.sh
 # -> build/lfp-full-build/libfprint/libfprint-2.so.2.0.0
 ```
@@ -127,7 +126,6 @@ open driver claimed the sensor.
 ## Try what exists today
 
 ```bash
-cd ~/source/repos/fingerprint-sensor
 make run
 ```
 

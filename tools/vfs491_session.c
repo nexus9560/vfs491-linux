@@ -1,7 +1,7 @@
 /*
  * vfs491_session.c -- probe the VFS491 command set and its SSLv3 session layer.
  *
- * Part of source/repos/fingerprint-sensor.  Open source; no vendor code.
+ * Part of vfs491-linux.  Open source; no vendor code.
  *
  * Commands this tool sends (all read-only, no sensor writes anywhere):
  *

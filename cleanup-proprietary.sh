@@ -10,7 +10,7 @@
 # except libfprint itself, which is restored with `dnf reinstall`.
 #
 # Usage (as root):
-#     sudo bash ~/source/repos/fingerprint-sensor/cleanup-proprietary.sh
+#     sudo bash cleanup-proprietary.sh
 #
 # Idempotent: safe to run more than once.
 

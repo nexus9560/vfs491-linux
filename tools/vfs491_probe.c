@@ -1,7 +1,7 @@
 /*
  * vfs491_probe.c -- read-only probe for the Validity VFS491 (USB 138a:003d)
  *
- * Part of source/repos/fingerprint-sensor.  Open source; no vendor code.
+ * Part of vfs491-linux.  Open source; no vendor code.
  *
  * What it does
  *   - finds 138a:003d

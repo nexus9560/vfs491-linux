@@ -33,7 +33,6 @@ ours / upstream.
 ## Install
 
 ```bash
-cd ~/source/repos/fingerprint-sensor
 ./proprietary/setup.sh          # fetch sp84530, gate-patch, install units (asks for sudo)
 sudo systemctl enable --now vfs491-bridge.service
 sudo systemctl restart fprintd

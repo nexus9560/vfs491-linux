@@ -1,7 +1,7 @@
 /*
  * vfs491_ssl.c -- complete the VFS491 proprietary-SSLv3 handshake with our own code.
  *
- * Part of source/repos/fingerprint-sensor.  Open source; no vendor code.
+ * Part of vfs491-linux.  Open source; no vendor code.
  *
  * This is the successor to vfs491_session.c.  Where that tool stopped after the
  * ServerHello, this one carries the handshake through to the sensor's Finished:
