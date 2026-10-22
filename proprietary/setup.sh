@@ -76,7 +76,9 @@ if [[ "$REUSE_INSTALLED" == no ]]; then
 fi
 
 # ---- 2. unpack + gate-patch ----------------------------------------------
-if [[ ! -x "$STAGE/validity-sensor-unlocked" ]]; then
+# Skipped when we are reusing the already-installed tool: in that case there is
+# no tarball to unpack (we never downloaded one).
+if [[ "$REUSE_INSTALLED" == no && ! -x "$STAGE/validity-sensor-unlocked" ]]; then
   say "unpacking RPM"
   rm -rf "$STAGE/root"
   mkdir -p "$STAGE/root"
