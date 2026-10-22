@@ -4,6 +4,7 @@
 #   make run            build and run the read-only probe
 #   make run-session    build and run the command-set / SSL session probe
 #   make run-unlock P1=... P2=...   reproduce HP's init (needs device write access)
+#   make test           hardware-free self-tests (no sensor, no root)
 #   make clean
 
 CC      ?= cc
@@ -52,4 +53,9 @@ run-ssl: $(BUILD)/vfs491_ssl
 clean:
 	rm -rf $(BUILD)
 
-.PHONY: all run run-session run-unlock run-ssl clean
+# Hardware-free self-tests: no sensor, no root, no fprintd.
+test:
+	python3 capture/selftest.py
+	python3 proprietary/selftest.py
+
+.PHONY: all run run-session run-unlock run-ssl clean test

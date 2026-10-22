@@ -207,10 +207,65 @@ the bridge is listening and the first login attempt times out.
 | `60-vfs491.rules` | udev rule: `power/control=on` for `138a:003d`, so the sensor is never autosuspended mid-capture |
 | `vfs491-lib.sh` | shared helpers: sensor discovery by USB ID, PAM dir/greeter detection, auth-user resolution |
 | `setup.sh` | fetch + verify + unpack + gate-patch + install units |
+| `selftest.py` | hardware-free self-test for the image-delivery half of `bridge.py` |
 
 Adapted from [saifulmd0/vfs495-linux](https://github.com/saifulmd0/vfs495-linux)
 and [mbtech-nl/nixos-validity-VFS491](https://github.com/mbtech-nl/nixos-validity-VFS491)
 (both MIT).
+
+## How images reach fprintd
+
+libfprint's `virtual_image` driver is not documented outside its source, and
+it dictates the shape of the bridge's delivery:
+
+* `libfprint/drivers/virtual-image.c`, `recv_image()` — reads an 8-byte
+  header: two little-endian `int32`, width then height.
+* `recv_image_hdr_recv_cb()` — reads `width * height` bytes of pixels, then
+  calls `recv_image()` **again**, expecting the next image on the *same*
+  stream.
+* `libfprint/drivers/virtual-device-listener.c`, `on_stream_read_cb()` — a
+  header read that hits EOF is reported as `G_IO_ERROR_INVALID_DATA`,
+  "Got empty data".
+
+So the bridge keeps one connection open and streams every image over it. A
+bridge that connects, sends one image and closes the socket still works, but
+makes libfprint log this on every single swipe:
+
+```
+Error receiving header for image data: Got empty data
+```
+
+It is harmless, but it looks like a fault, and it buries errors that do
+matter. `proprietary/selftest.py` pins the behaviour both ways — it asserts
+the current code causes no EOF, and that the old connect/send/close pattern
+does:
+
+```bash
+python3 proprietary/selftest.py     # no hardware, no root, no fprintd
+```
+
+## Swipe length matters more than you would expect
+
+Correlating every captured image with the score fprintd gave it:
+
+| image height | best score | verdict |
+|---|---|---|
+| 300 | 175/40 | match |
+| 287 | 10/40 | no match |
+| 258 | 6/40 | no match |
+| 227 | 8/40 | no match |
+| 131 | 4/40 | no match |
+| 94 / 86 | 0/40 | no match |
+
+A *full-length* swipe is 200×300. Anything shorter is a swipe that was cut
+short — usually by the sensor being autosuspended mid-capture — and such an
+image scores near zero no matter which finger it is. That is the reason the
+udev rule above matters so much, and why the bridge retries a truncated
+capture rather than handing it to fprintd as-is.
+
+`bridge.py` treats images shorter than `VFS491_MIN_ROWS` (default 80) as
+unusable. Raise it if your sensor produces shorter images for a perfectly
+good swipe.
 
 ## Swiping tips (from the reference project's results)
 

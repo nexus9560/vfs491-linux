@@ -49,12 +49,18 @@ import dbus.mainloop.glib
 from gi.repository import GLib
 
 SOCK = os.environ.get("FP_VIRTUAL_IMAGE", "/run/fprint/virtimg_sock")
+SOCK_TIMEOUT = 30                           # seconds for a connect/send to the listener
 CAPTURE = os.environ.get("VFS491_CAPTURE")
 if not CAPTURE:
     sys.stderr.write("vfs491-bridge: VFS491_CAPTURE is not set "
                      "(path to capture.py); see the systemd unit\n")
     sys.exit(1)
-MIN_ROWS = 80                                # a real swipe assembles to ~200x300; tiny = no usable print
+MIN_ROWS = int(os.environ.get("VFS491_MIN_ROWS", "80"))
+# A real swipe assembles to 200x300. Anything shorter is a truncated swipe:
+# in practice such an image scores near zero against every enrolled print
+# (measured: a full 300-row swipe scored 175/40, a 287-row one 10/40), so it
+# is usually a swipe that was cut short rather than a different finger.
+# Override with VFS491_MIN_ROWS if your sensor or swipe style differs.
 RUN = "/run/vfs491-fprint"                   # tmpfs, root only; last.pgm = most recent capture (debugging)
 BUS_NAME, DEV_IFACE = "net.reactivated.Fprint", "net.reactivated.Fprint.Device"
 PROPS = "org.freedesktop.DBus.Properties"
@@ -74,11 +80,89 @@ def read_pgm(p):
         return w, h, f.read(w * h)
 
 
+_conn = None                                # persistent link to fprintd's virtual_image listener
+_conn_lock = threading.RLock()             # only one capture runs at a time, but be explicit
+
+
+def _conn_alive(s):
+    """Is the peer still there?
+
+    The bridge never receives anything, so a non-blocking peek that raises
+    EAGAIN means "alive, nothing to read"; a zero-length read means the peer
+    closed its end and the socket has to be replaced.
+    """
+    try:
+        s.settimeout(0)
+        try:
+            data = s.recv(1, socket.MSG_PEEK)
+        except (BlockingIOError, InterruptedError):
+            return True
+        return bool(data)                   # False => peer closed
+    except OSError:
+        return False
+    finally:
+        try:
+            s.settimeout(SOCK_TIMEOUT)
+        except OSError:
+            pass
+
+
+def _drop_conn():
+    """Discard the listener connection (fprintd restarted, or it went away)."""
+    global _conn
+    with _conn_lock:
+        if _conn is not None:
+            try:
+                _conn.close()
+            except OSError:
+                pass
+            _conn = None
+
+
+def _connect():
+    """Return a live connection to the listener, opening one if needed."""
+    global _conn
+    with _conn_lock:
+        if _conn is not None:
+            if _conn_alive(_conn):
+                return _conn
+            _drop_conn()
+        s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        s.settimeout(SOCK_TIMEOUT)
+        s.connect(SOCK)
+        _conn = s
+        return s
+
+
 def deliver(w, h, data):
-    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-    s.connect(SOCK)
-    s.sendall(struct.pack("<ii", w, h) + data)
-    s.close()
+    """Hand one image to fprintd's virtual_image listener.
+
+    The connection is deliberately kept open between images. libfprint's
+    virtual_image driver reads an 8-byte header, then width*height bytes,
+    then loops back for the next image *on the same stream* -- see
+    libfprint/drivers/virtual-image.c (recv_image/recv_image_hdr_recv_cb).
+    Closing the socket after every image makes that next header read hit EOF,
+    which libfprint reports as
+
+        Error receiving header for image data: Got empty data
+
+    Harmless, but it is logged as a warning on every single swipe, it looks
+    alarming, and it drowns out errors that actually matter.
+    """
+    payload = struct.pack("<ii", w, h) + data
+    with _conn_lock:
+        try:
+            _connect().sendall(payload)
+        except OSError as e:
+            # A stale connection (fprintd restarted, listener went away): drop
+            # it and try once more with a fresh one.
+            log(f"delivery failed ({e}); reconnecting and retrying once")
+            _drop_conn()
+            try:
+                _connect().sendall(payload)
+            except OSError as e2:
+                log(f"delivery failed: {e2}")
+                raise
 
 
 def recover_sensor():
@@ -262,6 +346,21 @@ def on_verify_selected(*args, path=None):
     on_needed("verify started")
 
 
+def on_name_owner_changed(name, old_owner, new_owner, path=None):
+    """fprintd (re)started: the listener socket is gone, so is our connection.
+
+    Without this we would keep a socket to a listener that no longer exists
+    and the next image would be written into a connection nobody reads.
+    """
+    if name != BUS_NAME:
+        return
+    if old_owner and not new_owner:
+        log("fprintd went away; dropping the listener connection")
+    elif new_owner and not old_owner:
+        log("fprintd came back; the next image will open a fresh connection")
+    _drop_conn()
+
+
 def main():
     dbus.mainloop.glib.DBusGMainLoop(set_as_default=True)
     bus = dbus.SystemBus()
@@ -269,6 +368,9 @@ def main():
                             dbus_interface=PROPS, bus_name=BUS_NAME, path_keyword="path")
     bus.add_signal_receiver(on_verify_selected, signal_name="VerifyFingerSelected",
                             dbus_interface=DEV_IFACE, bus_name=BUS_NAME, path_keyword="path")
+    # fprintd restarting invalidates the listener socket we are connected to.
+    bus.add_signal_receiver(on_name_owner_changed, signal_name="NameOwnerChanged",
+                            dbus_interface="org.freedesktop.DBus", path_keyword="path")
 
     def check_initial():                                # a scan already pending at startup?
         try:
