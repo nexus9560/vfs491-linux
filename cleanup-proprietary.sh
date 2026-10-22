@@ -66,6 +66,9 @@ for g in gdm sddm lightdm plasmalogin lxdm greetd ly xdm; do
   rmdir --ignore-fail-on-non-empty "/etc/systemd/system/${g}.service.d" 2>/dev/null || true
 done
 
+note "udev rule (autosuspend)"
+rm -f /etc/udev/rules.d/60-vfs491.rules
+
 note "run-time state"
 rm -rf /run/vfs491-fprint /run/fprint
 

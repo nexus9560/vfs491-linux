@@ -149,23 +149,52 @@ pushes it into the "Open Sensor failed" wedge.
 
 ## Recovering a wedged sensor
 
-After many rapid captures the sensor can stop opening (`Sensor isn't detected`).
-A **USB re-enumeration** recovers it without a reboot. The script finds the
-sensor by its USB IDs, so there is no port path to adjust:
+This is handled automatically now, but the manual path is still there.
+
+**What causes it.** The kernel's default USB autosuspend delay is 2 seconds,
+and the VFS491's endpoints do not survive a suspend/resume cycle. A capture
+that spans one comes back truncated — a 200×86 or 200×58 strip instead of a
+200×300 print — and repeated suspend/resume cycles eventually leave the device
+wedged so it stops opening at all (`Sensor isn't detected`). A cold boot is the
+worst case, because the sensor sits idle and suspended from the moment it
+enumerates until you touch it.
+
+**What we do about it**, in three layers:
+
+1. `60-vfs491.rules` (installed to `/etc/udev/rules.d/`) sets
+   `power/control=on` for `138a:003d`, so the sensor is never autosuspended.
+2. The bridge unit runs `vfs491-recover --if-present` as an `ExecStartPre`, so
+   every boot starts with the sensor re-enumerated and awake.
+3. The bridge itself self-heals mid-session: if a capture fails or comes back
+   truncated, it re-enumerates the sensor and retries **once**. (A blind retry
+   is not allowed — that is what drives the device into the wedge in the first
+   place. A retry that follows a re-enumeration resets the device instead of
+   grinding it.)
+
+**Manual recovery**, if you ever need it:
 
 ```bash
-./enable-auth.sh --reenumerate                            # or, by hand:
-sudo sh -c 'd=$(for x in /sys/bus/usb/devices/*/; do
-    [ "$(cat $x/idVendor 2>/dev/null)" = 138a ] &&
-    [ "$(cat $x/idProduct 2>/dev/null)" = 003d ] && echo ${x%/} && break
-  done)
-  echo 0 > "$d/authorized"; sleep 2; echo 1 > "$d/authorized"'
-sudo /usr/libexec/vfs491/vfs491-capture /tmp/fp.pgm     # should work again
+sudo /usr/libexec/vfs491/vfs491-recover            # wake it; reset only if unhealthy
+sudo /usr/libexec/vfs491/vfs491-recover --reset    # always re-enumerate
+./enable-auth.sh --reenumerate                     # same thing, convenience alias
 ```
 
+The script finds the sensor by its USB IDs, so there is no port path to adjust.
 The sysfs node (`3-1.1`, `1-1.4`, ...) is specific to your USB topology and
 differs between machines, docks and reboots, which is why we match on
 `138a:003d` instead of hard-coding it.
+
+> Note: `sudo` here will itself offer a fingerprint first (that is the point of
+> this project), so it can pause for a swipe before the command runs. Use
+> `sudo -n` if you want it to fail fast instead.
+
+## Cold-boot ordering
+
+The bridge is ordered `After=basic.target` / `Before=multi-user.target`, and
+`setup.sh` installs a drop-in making your display manager
+(`gdm`, `sddm`, `lightdm`, `plasmalogin`, ...) wait for
+`vfs491-bridge.service`. Without that, the greeter can ask for a finger before
+the bridge is listening and the first login attempt times out.
 
 ## Files
 
@@ -173,7 +202,10 @@ differs between machines, docks and reboots, which is why we match on
 |---|---|
 | `harvest.py` | gdb script: breakpoint at `IRqualityDetermination` (`0x4689b0`), copies the assembled image out; touches `$VFS_ARMED` when `SensorGetPrintWait` is entered |
 | `capture.py` | one swipe → PGM, via gdb + `harvest.py` |
-| `bridge.py` | event-driven: one capture per `finger-needed`, delivers to the `virtual_image` socket; logs `SWIPE NOW` on the armed signal |
+| `bridge.py` | event-driven: one capture per `finger-needed`, delivers to the `virtual_image` socket; logs `SWIPE NOW` on the armed signal; re-enumerates and retries once on a failed or truncated capture |
+| `vfs491-recover` | puts the sensor in a known-good state: finds it by USB ID, re-enumerates it, and keeps it out of autosuspend |
+| `60-vfs491.rules` | udev rule: `power/control=on` for `138a:003d`, so the sensor is never autosuspended mid-capture |
+| `vfs491-lib.sh` | shared helpers: sensor discovery by USB ID, PAM dir/greeter detection, auth-user resolution |
 | `setup.sh` | fetch + verify + unpack + gate-patch + install units |
 
 Adapted from [saifulmd0/vfs495-linux](https://github.com/saifulmd0/vfs495-linux)

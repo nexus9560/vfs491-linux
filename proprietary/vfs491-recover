@@ -1,0 +1,106 @@
+#!/usr/bin/env bash
+# vfs491-recover -- put the VFS491 into a known-good state.
+#
+#   vfs491-recover              # wake it up, re-enumerate only if it looks bad
+#   vfs491-recover --reset      # always re-enumerate (authorized 0 -> 1)
+#   vfs491-recover --if-present # exit 0 quietly if the sensor is not attached
+#
+# Why this exists
+#   After a cold boot the sensor is sometimes left deauthorized or USB-
+#   autosuspended. A suspended sensor resumes into a half-initialised state:
+#   swipes come back truncated (200x86 instead of 200x300) and, if it keeps
+#   happening, the device wedges outright and stops opening at all.
+#
+#   The cure is a USB re-enumeration, which used to mean typing a command with
+#   a hard-coded bus-port path. This script does it by USB ID instead, and
+#   keeps the sensor out of autosuspend so it does not happen again.
+#
+# Must run as root (it writes to /sys/bus/usb/devices/...).
+set -euo pipefail
+
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# The lib lives next to this script when installed, and in ../proprietary/ when
+# run straight from a checkout. Support both.
+if [ -f "$HERE/vfs491-lib.sh" ]; then
+  . "$HERE/vfs491-lib.sh"
+elif [ -f "$HERE/../proprietary/vfs491-lib.sh" ]; then
+  . "$HERE/../proprietary/vfs491-lib.sh"
+else
+  echo "ERROR: cannot find vfs491-lib.sh next to $0 or in ../proprietary/" >&2
+  exit 1
+fi
+
+RESET=no
+IF_PRESENT=no
+# Seconds to wait for the device to show up. Keep this short: this runs as an
+# ExecStartPre on the bridge, and the login greeter waits for the bridge, so a
+# missing sensor would otherwise delay the login screen.
+WAIT="${VFS491_WAIT:-10}"
+
+for arg in "$@"; do
+  case "$arg" in
+    --reset)      RESET=yes ;;
+    --if-present) IF_PRESENT=yes ;;
+    -h|--help)
+      cat <<'EOF'
+usage: vfs491-recover [--reset] [--if-present]
+
+  (no flag)      wake the sensor; re-enumerate only if it is not healthy
+  --reset        always re-enumerate the USB device
+  --if-present   exit 0 if the sensor is not attached
+EOF
+      exit 0 ;;
+    *) vfs_die "unknown option: $arg" ;;
+  esac
+done
+
+if [ "$(id -u)" -ne 0 ]; then
+  vfs_die "must run as root (it writes to /sys/bus/usb/devices/...)"
+fi
+
+# --- wait for the device to show up ------------------------------------------
+dev=""
+i=0
+while [ "$i" -lt "$WAIT" ]; do
+  if dev="$(vfs_sensor_sysfs)"; then
+    break
+  fi
+  sleep 1
+  i=$((i + 1))
+done
+
+if [ -z "$dev" ]; then
+  if [ "$IF_PRESENT" = yes ]; then
+    echo "vfs491-recover: sensor ${VFS491_VID}:${VFS491_PID} not attached; nothing to do"
+    exit 0
+  fi
+  vfs_err "sensor ${VFS491_VID}:${VFS491_PID} not found on the USB bus"
+  vfs_err "check: lsusb -d ${VFS491_VID}:${VFS491_PID}"
+  exit 1
+fi
+
+# --- is it healthy? ----------------------------------------------------------
+authorized="$(cat "$dev/authorized" 2>/dev/null || echo 0)"
+runtime="$(cat "$dev/power/runtime_status" 2>/dev/null || echo unknown)"
+control="$(cat "$dev/power/control" 2>/dev/null || echo unknown)"
+
+vfs_say "sensor at ${dev##*/} (authorized=${authorized}, power=${control}/${runtime})"
+
+need_reset=no
+[ "$authorized" = "1" ] || need_reset=yes
+[ "$RESET" = yes ] && need_reset=yes
+
+if [ "$need_reset" = yes ]; then
+  vfs_reenumerate
+  vfs_say "sensor re-enumerated"
+else
+  # Healthy, but make sure it cannot autosuspend under us mid-capture.
+  if [ "$control" != "on" ]; then
+    if vfs_sensor_nosuspend; then
+      vfs_say "disabled USB autosuspend (was: $control)"
+    fi
+  fi
+  vfs_say "sensor is healthy"
+fi
+
+exit 0

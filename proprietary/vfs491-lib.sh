@@ -63,16 +63,51 @@ vfs_sensor_sysfs() {
   return 1
 }
 
+# Keep the sensor out of USB autosuspend.
+#
+# This matters: the kernel's default autosuspend delay is 2 s, and the VFS491's
+# endpoints do not survive a suspend/resume cycle. A capture that spans one
+# comes back truncated (a 200x86 or 200x58 strip instead of a 200x300 print),
+# and repeated suspend/resume cycles eventually wedge the device outright.
+# The udev rule (60-vfs491.rules) does this persistently; this is the runtime
+# belt-and-braces for devices that were plugged in before the rule existed.
+vfs_sensor_nosuspend() {
+  local dev
+  dev="$(vfs_sensor_sysfs)" || return 1
+  [ -e "$dev/power/control" ] || return 0
+  # Needs root to write a sysfs attribute; vfs_sudo is a no-op if we are root.
+  vfs_sudo sh -c "printf 'on' > '$dev/power/control'" 2>/dev/null || return 1
+  return 0
+}
+
 # Re-enumerate the device to clear a wedged sensor, without a reboot.
+#
+# After deauthorizing, the device may re-appear under a different sysfs name,
+# so the node is looked up again by VID:PID rather than reused blindly.
 # Usage: vfs_reenumerate
 vfs_reenumerate() {
-  local dev
+  local dev nxt i
   dev="$(vfs_sensor_sysfs)" || {
     vfs_err "sensor ${VFS491_VID}:${VFS491_PID} not found on the USB bus"
     return 1
   }
   vfs_say "re-enumerating ${dev##*/} (no reboot needed)"
-  vfs_sudo sh -c "echo 0 > '$dev/authorized'; sleep 2; echo 1 > '$dev/authorized'"
+  vfs_sudo sh -c "echo 0 > '$dev/authorized'" || return 1
+  sleep 2
+  nxt="$(vfs_sensor_sysfs)" || {
+    vfs_err "sensor did not come back after deauthorize"
+    return 1
+  }
+  vfs_sudo sh -c "echo 1 > '$nxt/authorized'" || return 1
+  # Wait for it to be usable again.
+  i=0
+  while [ "$i" -lt 20 ]; do
+    [ "$(cat "$nxt/authorized" 2>/dev/null)" = "1" ] && break
+    sleep 0.5
+    i=$((i + 1))
+  done
+  vfs_sensor_nosuspend || true
+  return 0
 }
 
 # --- PAM module directory ----------------------------------------------------

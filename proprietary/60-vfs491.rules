@@ -1,0 +1,19 @@
+# VFS491 fingerprint sensor (USB 138a:003d).
+#
+# Keep the sensor powered while it is plugged in.
+#
+# The kernel's default USB autosuspend delay is 2 seconds, and the VFS491's
+# endpoints do not survive a suspend/resume cycle: a capture that spans one
+# comes back truncated (a 200x86 or 200x58 strip instead of a 200x300 print),
+# and repeated suspend/resume cycles eventually leave the device wedged so it
+# stops opening at all.
+#
+# Disabling autosuspend for this one device keeps swipes full length and the
+# sensor recoverable without a reboot. It is the only hardware-specific rule
+# in this project, and it matches on the USB IDs rather than a bus port.
+#
+# The capture path uses HP's own tool, not a libfprint driver, so libfprint's
+# own autosuspend hwdb (which deliberately *enables* suspend for known-good
+# devices) does not apply here.
+
+ACTION=="add|change", SUBSYSTEM=="usb", ATTR{idVendor}=="138a", ATTR{idProduct}=="003d", ATTR{power/control}="on"

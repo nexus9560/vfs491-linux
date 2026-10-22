@@ -106,6 +106,9 @@ docs/ssl-notes.md        SSLv3 session layer (handshake, CV, keys)
 docs/hp-artifacts.md     HP/Synaptics reference binaries
 docs/capture.md          capture methodology
 proprietary/             WORKING PATH: HP capture + open bridge (see its README)
+proprietary/vfs491-recover   re-enumerate the sensor / clear a wedge (by USB ID)
+proprietary/60-vfs491.rules  udev: keep the sensor out of USB autosuspend
+Agent.md                 attribution + how this project was built
 reference/               prior art, cloned on demand (not committed)
 captures/                capture output (not committed)
 ```

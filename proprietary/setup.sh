@@ -55,14 +55,25 @@ rpm_unpacker() {
 
 mkdir -p "$STAGE"
 
+# If a gate-patched binary is already installed, reuse it instead of fetching
+# HP's SoftPaq again. This makes re-running setup.sh (e.g. to install a fix)
+# work offline, and $STAGE normally lives in /tmp, which a reboot wipes.
+INSTALLED_TOOL="$LIBEXEC/validity-sensor-unlocked"
+REUSE_INSTALLED=no
+if [[ ! -x "$STAGE/validity-sensor-unlocked" && -x "$INSTALLED_TOOL" ]]; then
+  REUSE_INSTALLED=yes
+  say "reusing the already-installed tool ($INSTALLED_TOOL); no download needed"
+fi
 
 # ---- 1. download ----------------------------------------------------------
-if [[ ! -f "$STAGE/sp84530.tar" ]]; then
-  say "downloading sp84530.tar"
-  curl -fL -o "$STAGE/sp84530.tar" "$SP_URL"
+if [[ "$REUSE_INSTALLED" == no ]]; then
+  if [[ ! -f "$STAGE/sp84530.tar" ]]; then
+    say "downloading sp84530.tar"
+    curl -fL -o "$STAGE/sp84530.tar" "$SP_URL"
+  fi
+  got="$(sha256sum "$STAGE/sp84530.tar" | awk '{print $1}')"
+  [[ "$got" == "$SP_SHA256" ]] || { echo "ERROR: sp84530 hash mismatch ($got)" >&2; exit 1; }
 fi
-got="$(sha256sum "$STAGE/sp84530.tar" | awk '{print $1}')"
-[[ "$got" == "$SP_SHA256" ]] || { echo "ERROR: sp84530 hash mismatch ($got)" >&2; exit 1; }
 
 # ---- 2. unpack + gate-patch ----------------------------------------------
 if [[ ! -x "$STAGE/validity-sensor-unlocked" ]]; then
@@ -112,10 +123,25 @@ fi
 # ---- 3. install -----------------------------------------------------------
 say "installing to $LIBEXEC (needs root)"
 vfs_sudo install -d -m 0755 "$LIBEXEC"
-vfs_sudo install -m 0755 "$STAGE/validity-sensor-unlocked" "$LIBEXEC/validity-sensor-unlocked"
+if [[ "$REUSE_INSTALLED" == yes ]]; then
+  echo "  (keeping the installed tool as-is)"
+else
+  vfs_sudo install -m 0755 "$STAGE/validity-sensor-unlocked" "$LIBEXEC/validity-sensor-unlocked"
+fi
 vfs_sudo install -m 0644 "$REPO/proprietary/harvest.py" "$LIBEXEC/harvest.py"
 vfs_sudo install -m 0755 "$REPO/proprietary/capture.py" "$LIBEXEC/capture.py"
 vfs_sudo install -m 0755 "$REPO/proprietary/bridge.py"  "$LIBEXEC/bridge.py"
+vfs_sudo install -m 0755 "$REPO/proprietary/vfs491-recover" "$LIBEXEC/vfs491-recover"
+# The lib is sourced by the recovery script, so it has to be next to it.
+vfs_sudo install -m 0644 "$REPO/proprietary/vfs491-lib.sh" "$LIBEXEC/vfs491-lib.sh"
+
+say "installing the udev rule (keeps the sensor out of USB autosuspend)"
+vfs_sudo install -d -m 0755 /etc/udev/rules.d
+vfs_sudo install -m 0644 "$REPO/proprietary/60-vfs491.rules" /etc/udev/rules.d/60-vfs491.rules
+command -v udevadm >/dev/null 2>&1 && {
+  vfs_sudo udevadm control --reload || true
+  vfs_sudo udevadm trigger --subsystem-match=usb --action=change || true
+}
 
 say "installing vfs491-capture wrapper"
 vfs_sudo install -m 0755 /dev/stdin "$LIBEXEC/vfs491-capture" <<SH
@@ -180,6 +206,16 @@ Environment=FP_VIRTUAL_IMAGE=/run/fprint/virtimg_sock
 Environment=VFS491_CAPTURE=${LIBEXEC}/capture.py
 Environment=VFS491_TOOL=${LIBEXEC}/validity-sensor-unlocked
 Environment=VFS491_HARVEST=${LIBEXEC}/harvest.py
+Environment=VFS491_RECOVER=${LIBEXEC}/vfs491-recover
+# Put the sensor in a known-good state before we serve any request. After a
+# cold boot it can be left deauthorized or USB-autosuspended, which truncates
+# swipes and eventually wedges the device.
+#
+# --reset       always re-enumerate the USB device, so every boot starts from a
+#               known-clean state (this is what used to be a manual chore).
+# --if-present  if the sensor is not plugged in, carry on rather than fail the
+#               unit; the bridge will still be ready for it when it appears.
+ExecStartPre=${LIBEXEC}/vfs491-recover --reset --if-present
 ExecStart=${PYTHON} ${LIBEXEC}/bridge.py
 Restart=always
 RestartSec=2

@@ -81,6 +81,30 @@ def deliver(w, h, data):
     s.close()
 
 
+def recover_sensor():
+    """Re-enumerate the sensor (USB 138a:003d) to clear a wedged/suspended state.
+
+    Returns True if the sensor came back. We look the device up by USB ID, not
+    by bus port, so this works on any machine and after any replug.
+    """
+    script = os.environ.get("VFS491_RECOVER")
+    if not script:
+        here = os.path.dirname(os.path.abspath(__file__))
+        script = os.path.join(here, "vfs491-recover")
+    if not os.path.exists(script):
+        log(f"recovery script not found at {script}; cannot re-enumerate")
+        return False
+    try:
+        r = subprocess.run([script, "--reset"], timeout=60)
+    except subprocess.TimeoutExpired:
+        log("recovery timed out")
+        return False
+    except OSError as e:
+        log(f"recovery failed to run: {e}")
+        return False
+    return r.returncode == 0
+
+
 def run_capture(out):
     """One capture attempt. Returns True if an image was written to `out`."""
     armed = RUN + "/armed"
@@ -140,23 +164,59 @@ def capture_and_deliver(gen):
     out, last = RUN + "/cap.pgm", RUN + "/last.pgm"
     t0 = time.monotonic()
     try:
-        # A single attempt. A blind retry doubles the wait and hammers the sensor's
-        # USB open/close path -- the known cause of its "Open Sensor failed" wedge.
-        # If the swipe misses, fprintd asks again on the next prompt; failing fast is
-        # both quicker and kinder to the hardware.
+        # A single attempt by default. A *blind* retry doubles the wait and
+        # hammers the sensor's USB open/close path -- the known cause of its
+        # "Open Sensor failed" wedge. But a retry that follows a USB
+        # re-enumeration is different: it resets the device state instead of
+        # grinding it, so we are allowed exactly one of those.
         ok = run_capture(out)
         if state["gen"] != gen or not state["wanted"]:
             log("capture cancelled (fprintd no longer waiting)")
             return
+
         if not ok:
-            log("no usable finger scan (single attempt; swipe again when prompted)")
+            log("capture failed; re-enumerating the sensor and trying once more")
+            if not recover_sensor():
+                log("recovery failed; swipe again when prompted")
+                return
+            ok = run_capture(out)
+            if state["gen"] != gen or not state["wanted"]:
+                log("capture cancelled (fprintd no longer waiting)")
+                return
+            if not ok:
+                log("no usable finger scan (swipe again when prompted)")
+                return
+
+        try:
+            img = read_pgm(out)
+            os.replace(out, last)
+        except Exception as e:          # noqa: BLE001 - a malformed image must not kill the service
+            log(f"could not read captured image: {e}")
             return
-        img = read_pgm(out)
-        os.replace(out, last)
         if img[1] < MIN_ROWS:
-            log(f"sensor returned a tiny scan ({img[0]}x{img[1]}): swipe too short/fast, "
-                "or the sensor is in its stuck state (recover with a USB re-enumeration)")
-            return
+            # A truncated image means the sensor was suspended or wedged
+            # mid-capture. Re-enumerate and try once; if the swipe itself was
+            # just short, the retry will produce a short image again and we
+            # report that honestly.
+            log(f"sensor returned a tiny scan ({img[0]}x{img[1]}): re-enumerating and retrying once")
+            if recover_sensor():
+                ok = run_capture(out)
+                if ok and state["gen"] == gen and state["wanted"]:
+                    try:
+                        img = read_pgm(out)
+                        os.replace(out, last)
+                    except Exception as e:      # noqa: BLE001 - never crash the service
+                        log(f"could not read retry image: {e}")
+                        img = None
+                else:
+                    img = None
+                if img is None or img[1] < MIN_ROWS:
+                    log("still no usable scan: swipe slowly, full length, and try again")
+                    return
+            else:
+                log("recovery failed; swipe again when prompted")
+                return
+
         try:
             deliver(*img)
             log(f"delivered scan {img[0]}x{img[1]} after {time.monotonic()-t0:.1f}s")
